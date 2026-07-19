@@ -605,25 +605,78 @@ Chọn topic `/landing/annotated_image` từ thanh công cụ để theo dõi tr
 #### Terminal 1: Khởi động Camera Publisher và Aruco Tracker
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
+source ~/precision_landing_ws/install/setup.bash
 
 # Tham số enable_mavros:=false dùng để chạy khi chưa có kết nối mạch FCU
 ros2 launch precision_landing real_fractal_detect.launch.py enable_mavros:=false
 ```
 
-*Lưu ý: Nếu bạn muốn thay đổi địa chỉ RTSP hoặc thông số camera calibration (tiêu cự fx, fy, cx, cy), hãy chỉnh sửa tại file `~/PX4/examples/SITL_PrecisionLanding/ros2_ws/src/precision_landing/config/rtsp_publisher_params.yaml`.*
+*Lưu ý: Nếu bạn muốn thay đổi địa chỉ RTSP hoặc thông số camera calibration (tiêu cự fx, fy, cx, cy), hãy chỉnh sửa tại file `~/precision_landing_ws/src/precision_landing/config/rtsp_publisher_params.yaml`.*
 
-#### Terminal 2: Theo dõi luồng ảnh Debug
-Bạn mở rqt để xem luồng video từ camera kèm theo khung bounding box nhận diện marker (nếu có):
+#### Terminal 2 (Tùy chọn): Nén luồng ảnh để truyền qua Wifi/Mạng (Tránh gián đoạn và trễ)
+Vì container chính đã lược bỏ dependency `cv_bridge` để tránh lỗi xung đột OpenCV ABI, luồng ảnh debug được đẩy trực tiếp dưới dạng ảnh thô (raw). Để xem mượt mà từ máy tính trạm hoặc qua Wifi, bạn chạy thêm một node trung gian độc lập để nén ảnh:
+```bash
+source /opt/ros/humble/setup.bash
+ros2 run image_transport republish raw compressed --ros-args --remap in:=/siyi/fractal_debug --remap out/compressed:=/siyi/fractal_debug/compressed
+```
+
+#### Terminal 3: Theo dõi luồng ảnh Debug
+Mở rqt để xem luồng video từ camera kèm theo khung bounding box nhận diện marker:
 ```bash
 source /opt/ros/humble/setup.bash
 ros2 run rqt_image_view rqt_image_view
 ```
-*Chọn topic `/siyi/fractal_debug` trên thanh công cụ của RQT.*
+*Chọn topic `/siyi/fractal_debug` (ảnh thô) hoặc `/siyi/fractal_debug/compressed` (ảnh nén nếu đã chạy Terminal 2).*
 
 Nếu bạn muốn kiểm tra luồng tọa độ (pose) nhận diện liên tục:
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
+source ~/precision_landing_ws/install/setup.bash
 ros2 topic echo /siyi/fractal_pose
 ```
+
+---
+
+## 4.0. Hướng Dẫn Đo Đạc Hiệu Năng Hệ Thống (CPU, GPU, VIC, NVDEC, Latency)
+
+Thư mục `scripts` cung cấp sẵn công cụ đo đạc hiệu năng tự động là [analyze_performance.py](file:///home/jb2/precision_landing_ws/src/precision_landing/scripts/analyze_performance.py). Script này sẽ tự động thu thập các chỉ số phần cứng Jetson (qua `tegrastats`) và tính toán tần số (FPS), tỷ lệ nhận diện thành công (detection rate), sai số định vị (accuracy), độ trễ truyền dẫn (End-to-End Latency).
+
+#### Cách chạy đo đạc:
+Mở một terminal mới và thực hiện tuần tự các lệnh sau:
+```bash
+# 1. Chuyển vào thư mục chứa script
+cd ~/precision_landing_ws/src/precision_landing/scripts/
+
+# 2. Source môi trường để nhận diện topic ROS 2
+source ~/precision_landing_ws/install/setup.bash
+
+# 3. Đặt cấu hình kết nối mạng nội bộ (phải trùng với Terminal 1)
+export ROS_LOCALHOST_ONLY=1
+
+# 4. Cache mật khẩu sudo một lần (để script gọi tegrastats đọc chỉ số GPU/VIC)
+sudo true
+
+# 5. Chạy script phân tích hiệu năng (chạy trong 60 giây)
+python3 analyze_performance.py
+```
+
+#### Kết quả đầu ra mẫu:
+Script sẽ chạy thu thập dữ liệu trong 60 giây và in ra báo cáo tổng hợp dạng:
+```text
+==================================================
+MEASUREMENT RESULTS (60 Seconds)
+==================================================
+Total Frames Received : 1345
+Average CPU Usage    : 19.2%
+Average GPU Usage    : 0.0% (GR3D)
+Average VIC Usage    : 5.7% (Video Image Coprocessor)
+Average NVDEC Usage  : 20.8%
+Average FPS          : 22.41
+Detection Rate       : 100.0%
+Average Distance     : 2.06m
+Accuracy (Std Dev)   : ±0.014m
+Average E2E Latency  : 12.0ms
+==================================================
+```
+*Script cũng sẽ tự động xuất ra một hàng bảng Markdown chuẩn để bạn copy trực tiếp vào báo cáo hiệu năng.*
+

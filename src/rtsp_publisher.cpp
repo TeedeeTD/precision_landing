@@ -47,22 +47,23 @@ RtspPublisher::RtspPublisher(const rclcpp::NodeOptions & options)
   // Open RTSP
   open_capture();
 
-  // Create Timer
-  double timer_period_sec = 1.0 / target_fps_;
-  timer_ = this->create_wall_timer(
-    std::chrono::duration<double>(timer_period_sec),
-    std::bind(&RtspPublisher::timer_callback, this)
-  );
+  // Start capture thread
+  thread_running_ = true;
+  capture_thread_ = std::thread(&RtspPublisher::capture_loop, this);
 
   RCLCPP_INFO(
     this->get_logger(),
-    "SIYI RTSP Publisher C++ started: url=%s, flip_180=%s, target_fps=%.1f, resolution=%dx%d",
+    "SIYI RTSP Publisher C++ started (Threaded): url=%s, flip_180=%s, target_fps=%.1f, resolution=%dx%d",
     rtsp_url_.c_str(), flip_180_ ? "true" : "false", target_fps_, image_width_, image_height_
   );
 }
 
 RtspPublisher::~RtspPublisher()
 {
+  thread_running_ = false;
+  if (capture_thread_.joinable()) {
+    capture_thread_.join();
+  }
   if (cap_.isOpened()) {
     cap_.release();
     RCLCPP_INFO(this->get_logger(), "RTSP capture released");
@@ -75,21 +76,25 @@ bool RtspPublisher::open_capture()
     cap_.release();
   }
 
-  RCLCPP_INFO(this->get_logger(), "Opening RTSP stream: %s", rtsp_url_.c_str());
-  cap_.open(rtsp_url_, cv::CAP_FFMPEG);
+  RCLCPP_INFO(this->get_logger(), "Opening RTSP stream with GStreamer: %s", rtsp_url_.c_str());
+  std::string pipeline = 
+      "rtspsrc location=" + rtsp_url_ + " latency=0 protocols=tcp ! "
+      "rtph264depay ! "
+      "nvv4l2decoder ! "  // Giải mã bằng GPU NVDEC
+      "nvvidconv flip-method=" + (flip_180_ ? "2" : "0") + " ! " // Lật 180 độ bằng GPU/VIC
+      "video/x-raw, format=GRAY8 ! " // Đưa ra định dạng ảnh xám 1 channel
+      "videoconvert ! appsink drop=true sync=false";
+
+  cap_.open(pipeline, cv::CAP_GSTREAMER);
 
   if (!cap_.isOpened()) {
     RCLCPP_ERROR(
       this->get_logger(),
-      "Failed to open RTSP stream: %s. Will retry on next timer tick.",
+      "Failed to open RTSP stream with GStreamer: %s. Will retry.",
       rtsp_url_.c_str()
     );
     return false;
   }
-
-  cap_.set(cv::CAP_PROP_FRAME_WIDTH, image_width_);
-  cap_.set(cv::CAP_PROP_FRAME_HEIGHT, image_height_);
-  cap_.set(cv::CAP_PROP_BUFFERSIZE, 1);
 
   fail_count_ = 0;
   RCLCPP_INFO(this->get_logger(), "RTSP stream opened successfully");
@@ -126,69 +131,69 @@ sensor_msgs::msg::CameraInfo RtspPublisher::build_camera_info()
   return msg;
 }
 
-void RtspPublisher::timer_callback()
+void RtspPublisher::capture_loop()
 {
-  if (!cap_.isOpened()) {
-    fail_count_++;
-    if (fail_count_ % 30 == 1) {
-      RCLCPP_WARN(
-        this->get_logger(),
-        "RTSP not open, attempting reconnect... (fail_count=%d)",
-        fail_count_
-      );
-    }
-    open_capture();
-    return;
-  }
-
-  cv::Mat frame;
-  bool ret = cap_.read(frame);
-
-  if (!ret || frame.empty()) {
-    fail_count_++;
-    if (fail_count_ >= max_consecutive_fails_) {
-      RCLCPP_WARN(
-        this->get_logger(),
-        "Lost RTSP stream after %d failures, reconnecting...",
-        fail_count_
-      );
+  while (rclcpp::ok() && thread_running_) {
+    if (!cap_.isOpened()) {
+      fail_count_++;
+      if (fail_count_ % 30 == 1) {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "RTSP not open, attempting reconnect... (fail_count=%d)",
+          fail_count_
+        );
+      }
       open_capture();
+      std::this_thread::sleep_for(std::chrono::milliseconds(500));
+      continue;
     }
-    return;
-  }
 
-  fail_count_ = 0;
-  frame_count_++;
+    cv::Mat gray_frame;
+    bool ret = cap_.read(gray_frame);
 
-  if (flip_180_) {
-    cv::flip(frame, frame, -1);
-  }
+    if (!ret || gray_frame.empty()) {
+      fail_count_++;
+      if (fail_count_ >= max_consecutive_fails_) {
+        RCLCPP_WARN(
+          this->get_logger(),
+          "Lost RTSP stream after %d failures, reconnecting...",
+          fail_count_
+        );
+        open_capture();
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
 
-  auto stamp = this->get_clock()->now();
+    fail_count_ = 0;
+    frame_count_++;
 
-  // Publish Image
-  try {
-    std_msgs::msg::Header header;
-    header.stamp = stamp;
-    header.frame_id = frame_id_;
-    auto img_msg = cv_bridge::CvImage(header, "bgr8", frame).toImageMsg();
-    image_pub_->publish(*img_msg);
-  } catch (const std::exception & e) {
-    RCLCPP_ERROR(this->get_logger(), "cv_bridge error: %s", e.what());
-    return;
-  }
+    auto stamp = this->get_clock()->now();
 
-  // Publish CameraInfo
-  camera_info_msg_.header.stamp = stamp;
-  info_pub_->publish(camera_info_msg_);
+    // Publish Image
+    try {
+      std_msgs::msg::Header header;
+      header.stamp = stamp;
+      header.frame_id = frame_id_;
+      auto img_msg = matToImageMsg(gray_frame, header, "mono8");
+      image_pub_->publish(*img_msg);
+    } catch (const std::exception & e) {
+      RCLCPP_ERROR(this->get_logger(), "Error converting mat to image: %s", e.what());
+      continue;
+    }
 
-  // Log stats periodically (every 5 seconds)
-  if (frame_count_ % (static_cast<int>(target_fps_) * 5) == 0) {
-    RCLCPP_INFO(
-      this->get_logger(),
-      "Published %d frames (%dx%d) flip_180=%s",
-      frame_count_, frame.cols, frame.rows, flip_180_ ? "true" : "false"
-    );
+    // Publish CameraInfo
+    camera_info_msg_.header.stamp = stamp;
+    info_pub_->publish(camera_info_msg_);
+
+    // Log stats periodically (every 5 seconds)
+    if (frame_count_ % (static_cast<int>(target_fps_) * 5) == 0) {
+      RCLCPP_INFO(
+        this->get_logger(),
+        "Published %d frames (%dx%d) flip_180=%s",
+        frame_count_, gray_frame.cols, gray_frame.rows, flip_180_ ? "true" : "false"
+      );
+    }
   }
 }
 

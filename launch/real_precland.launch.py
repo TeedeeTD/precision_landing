@@ -3,9 +3,7 @@ Launch file: Real SIYI A8 Mini + Fractal ArUco Tracker + Offboard Precision Land
 
 Pipeline:
   1. MAVROS — connects to FCU (optional, can skip if no FCU connected)
-  2. siyi_camera_bridge — RTSP stream → /siyi/image_raw + /siyi/camera_info (C++ rtsp_publisher)
-  3. aruco_fractal_tracker — detect fractal marker, publish pose + debug image (C++ tracker)
-  4. offboard_precland_controller — controls UAV for precision landing using tracker pose (C++ controller)
+  2. Composable Node Container — Runs RtspPublisher, ArucoFractalTracker, and OffboardPreclandController in a single process with Zero-copy IPC.
 """
 
 import os
@@ -13,6 +11,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 from launch.actions import IncludeLaunchDescription
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
@@ -46,9 +46,6 @@ def generate_launch_description():
 
     # ── Launch Arguments ────────────────────────────────────────────
 
-
-
-
     enable_mavros_arg = DeclareLaunchArgument(
         'enable_mavros',
         default_value='true',
@@ -61,72 +58,71 @@ def generate_launch_description():
         description='MAVROS FCU URL (e.g. /dev/ttyACM0:57600 for USB Pixhawk)'
     )
 
-
-
     # ── 1. MAVROS (optional) ────────────────────────────────────────
 
     mavros_launch = OpaqueFunction(function=_maybe_start_mavros)
 
-    # ── 2. SIYI RTSP Camera Bridge ─────────────────────────────────
+    # ── 2. Composable Node Container (Intra-Process Communication) ──
 
-    rtsp_node = Node(
+    precland_container = ComposableNodeContainer(
+        name='precision_landing_container',
+        namespace='',
         package='precision_landing',
-        executable='rtsp_publisher',
-        name='siyi_rtsp_publisher',
-        parameters=[rtsp_params_file],
-        output='screen'
-    )
-
-    # ── 3. Fractal ArUco Tracker ────────────────────────────────────
-
-    tracker_node = Node(
-        package='precision_landing',
-        executable='aruco_fractal_tracker',
-        name='aruco_fractal_tracker',
-        parameters=[
-            offboard_params_file,
-            {
-                'marker_configuration': os.path.join(
-                    get_package_share_directory('precision_landing'),
-                    'config',
-                    'custom_fractal.yml'
-                ),
-                'use_sim_time': False,
-            }
+        executable='precland_container',
+        composable_node_descriptions=[
+            ComposableNode(
+                package='precision_landing',
+                plugin='precision_landing::RtspPublisher',
+                name='siyi_rtsp_publisher',
+                parameters=[rtsp_params_file],
+                extra_arguments=[{'use_intra_process_comm': True}],
+            ),
+            ComposableNode(
+                package='precision_landing',
+                plugin='fractal_tracker::ArucoFractalTracker',
+                name='aruco_fractal_tracker',
+                parameters=[
+                    offboard_params_file,
+                    {
+                        'marker_configuration': os.path.join(
+                            get_package_share_directory('precision_landing'),
+                            'config',
+                            'custom_fractal.yml'
+                        ),
+                        'use_sim_time': False,
+                    }
+                ],
+                remappings=[
+                    ('image_input_topic', '/siyi/image_raw'),
+                    ('camera_info_topic', '/siyi/camera_info'),
+                    ('image_output_topic', '/siyi/fractal_debug'),
+                    ('poses_output_topic', '/siyi/fractal_pose'),
+                    ('target_output_topic', '/siyi/landing_target'),
+                ],
+                extra_arguments=[{'use_intra_process_comm': True}],
+            ),
+            ComposableNode(
+                package='precision_landing',
+                plugin='precision_landing::OffboardPreclandController',
+                name='offboard_precland_controller',
+                parameters=[
+                    offboard_params_file,
+                    {
+                        'use_sim_time': False,
+                        'target_topic': '/siyi/landing_target',
+                        'target_pose_topic': '/siyi/fractal_pose',
+                        'align_yaw_to_tag': True,
+                    }
+                ],
+                extra_arguments=[{'use_intra_process_comm': True}],
+            ),
         ],
-        remappings=[
-            ('image_input_topic', '/siyi/image_raw'),
-            ('camera_info_topic', '/siyi/camera_info'),
-            ('image_output_topic', '/siyi/fractal_debug'),
-            ('poses_output_topic', '/siyi/fractal_pose'),
-            ('target_output_topic', '/siyi/landing_target'),
-        ],
-        output='screen'
-    )
-
-    # ── 4. Offboard Precision Landing Controller ────────────────────
-
-    controller_node = Node(
-        package='precision_landing',
-        executable='offboard_precland_controller',
-        name='offboard_precland_controller',
-        parameters=[
-            offboard_params_file,
-            {
-                'use_sim_time': False,
-                'target_topic': '/siyi/landing_target',
-                'target_pose_topic': '/siyi/fractal_pose',
-                'align_yaw_to_tag': True,
-            }
-        ],
-        output='screen'
+        output='screen',
     )
 
     return LaunchDescription([
         enable_mavros_arg,
         fcu_url_arg,
         mavros_launch,
-        rtsp_node,
-        tracker_node,
-        controller_node,
+        precland_container,
     ])

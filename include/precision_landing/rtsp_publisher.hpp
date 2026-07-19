@@ -4,10 +4,12 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <thread>
+#include <atomic>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
-#include <cv_bridge/cv_bridge.h>
+#include "precision_landing/cv_bridge_helper.hpp"
 #include <opencv2/opencv.hpp>
 
 namespace precision_landing
@@ -22,7 +24,7 @@ public:
 private:
   bool open_capture();
   sensor_msgs::msg::CameraInfo build_camera_info();
-  void timer_callback();
+  void capture_loop();
 
   // Parameters
   std::string rtsp_url_;
@@ -45,8 +47,9 @@ private:
   cv::VideoCapture cap_;
   sensor_msgs::msg::CameraInfo camera_info_msg_;
 
-  // Timer
-  rclcpp::TimerBase::SharedPtr timer_;
+  // Threading for Capture
+  std::thread capture_thread_;
+  std::atomic<bool> thread_running_{false};
 
   // Stats
   int frame_count_{0};

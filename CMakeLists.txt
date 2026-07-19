@@ -19,7 +19,6 @@ find_package(std_msgs REQUIRED)
 find_package(dib_msgs REQUIRED)
 find_package(mavros_msgs REQUIRED)
 find_package(rclcpp_components REQUIRED)
-find_package(cv_bridge REQUIRED)
 find_package(aruco REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(tf2 REQUIRED)
@@ -44,7 +43,6 @@ set_target_properties(aruco_fractal_tracker_node PROPERTIES
 )
 ament_target_dependencies(aruco_fractal_tracker_node 
   rclcpp 
-  cv_bridge 
   geometry_msgs 
   sensor_msgs 
   std_msgs
@@ -71,7 +69,6 @@ ament_target_dependencies(rtsp_publisher_node
   rclcpp
   sensor_msgs
   rclcpp_components
-  cv_bridge
   OpenCV
 )
 rclcpp_components_register_nodes(rtsp_publisher_node "precision_landing::RtspPublisher")
@@ -98,6 +95,14 @@ rclcpp_components_register_nodes(offboard_precland_controller_node "precision_la
 add_executable(offboard_precland_controller src/offboard_precland_controller_main.cpp)
 target_link_libraries(offboard_precland_controller offboard_precland_controller_node)
 
+# ── Custom Component Container (Forces OpenCV 4.8.0 linking) ─────────
+add_executable(precland_container src/precland_container.cpp)
+ament_target_dependencies(precland_container
+  rclcpp
+  rclcpp_components
+  OpenCV
+)
+
 # ── 4. Install Targets ────────────────────────────────────────────────
 install(
   DIRECTORY include/${PROJECT_NAME}
@@ -120,6 +125,7 @@ install(
     aruco_fractal_tracker
     rtsp_publisher
     offboard_precland_controller
+    precland_container
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -149,7 +155,6 @@ ament_export_dependencies(
   dib_msgs
   mavros_msgs
   rclcpp_components 
-  cv_bridge 
   aruco
   tf2
   tf2_geometry_msgs

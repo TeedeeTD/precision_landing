@@ -3,6 +3,8 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.actions import ComposableNodeContainer
+from launch_ros.descriptions import ComposableNode
 from launch.actions import IncludeLaunchDescription
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
@@ -53,47 +55,52 @@ def generate_launch_description():
 
     mavros_launch = OpaqueFunction(function=_maybe_start_mavros)
 
-    # ── 2. RTSP Camera Publisher ───────────────────────────────────
+    # ── 2. Composable Node Container (Intra-Process Communication) ──
 
-    rtsp_node = Node(
+    precland_container = ComposableNodeContainer(
+        name='precision_landing_container',
+        namespace='',
         package='precision_landing',
-        executable='rtsp_publisher',
-        name='siyi_rtsp_publisher',
-        parameters=[rtsp_params_file],
-        output='screen'
-    )
-
-    # ── 3. Fractal ArUco Tracker ────────────────────────────────────
-
-    tracker_node = Node(
-        package='precision_landing',
-        executable='aruco_fractal_tracker',
-        name='aruco_fractal_tracker',
-        parameters=[
-            offboard_params_file,
-            {
-                'marker_configuration': os.path.join(
-                    get_package_share_directory('precision_landing'),
-                    'config',
-                    'custom_fractal.yml'
-                ),
-                'use_sim_time': False,
-            }
+        executable='precland_container',
+        composable_node_descriptions=[
+            ComposableNode(
+                package='precision_landing',
+                plugin='precision_landing::RtspPublisher',
+                name='siyi_rtsp_publisher',
+                parameters=[rtsp_params_file],
+                extra_arguments=[{'use_intra_process_comm': True}],
+            ),
+            ComposableNode(
+                package='precision_landing',
+                plugin='fractal_tracker::ArucoFractalTracker',
+                name='aruco_fractal_tracker',
+                parameters=[
+                    offboard_params_file,
+                    {
+                        'marker_configuration': os.path.join(
+                            get_package_share_directory('precision_landing'),
+                            'config',
+                            'custom_fractal.yml'
+                        ),
+                        'use_sim_time': False,
+                    }
+                ],
+                remappings=[
+                    ('image_input_topic', '/siyi/image_raw'),
+                    ('camera_info_topic', '/siyi/camera_info'),
+                    ('image_output_topic', '/siyi/fractal_debug'),
+                    ('poses_output_topic', '/siyi/fractal_pose'),
+                    ('target_output_topic', '/siyi/landing_target'),
+                ],
+                extra_arguments=[{'use_intra_process_comm': True}],
+            ),
         ],
-        remappings=[
-            ('image_input_topic', '/siyi/image_raw'),
-            ('camera_info_topic', '/siyi/camera_info'),
-            ('image_output_topic', '/siyi/fractal_debug'),
-            ('poses_output_topic', '/siyi/fractal_pose'),
-            ('target_output_topic', '/siyi/landing_target'),
-        ],
-        output='screen'
+        output='screen',
     )
 
     return LaunchDescription([
         enable_mavros_arg,
         fcu_url_arg,
         mavros_launch,
-        rtsp_node,
-        tracker_node,
+        precland_container,
     ])

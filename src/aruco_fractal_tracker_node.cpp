@@ -25,7 +25,7 @@
 #include <sstream>
 #include <vector>
 #include <unistd.h>
-#include <cv_bridge/cv_bridge.h>
+#include "precision_landing/cv_bridge_helper.hpp"
 #include <opencv2/opencv.hpp>
 #include <tf2/LinearMath/Matrix3x3.h>
 #include <tf2/LinearMath/Transform.h>
@@ -221,8 +221,8 @@ void ArucoFractalTracker::cameraInfoCallback(const sensor_msgs::msg::CameraInfo:
 void ArucoFractalTracker::imageCallback(const sensor_msgs::msg::Image::SharedPtr msg)
 {
   const auto callback_start = std::chrono::steady_clock::now();
-  cv_bridge::CvImagePtr cv_ptr;
-  cv::Mat gray;
+  struct FakeCvBridge { cv::Mat image; };
+  auto cv_ptr = std::make_unique<FakeCvBridge>();
   ++frame_count_;
   const auto now = this->get_clock()->now();
 
@@ -264,17 +264,15 @@ void ArucoFractalTracker::imageCallback(const sensor_msgs::msg::Image::SharedPtr
 
   try
   {
-    cv_ptr = cv_bridge::toCvCopy(msg, "bgr8");
+    cv_ptr->image = precision_landing::imageMsgToMat(msg);
   }
-  catch (cv_bridge::Exception& e)
+  catch (const std::exception& e)
   {
-    RCLCPP_ERROR_STREAM(this->get_logger(), "cv_bridge exception: " << e.what());
+    RCLCPP_ERROR_STREAM(this->get_logger(), "Image conversion exception: " << e.what());
     return;
   }
 
-  cv::cvtColor(cv_ptr->image, gray, cv::COLOR_BGR2GRAY);
-
-  if (detector_.detect(gray))
+  if (detector_.detect(cv_ptr->image))
   {
     detector_.drawMarkers(cv_ptr->image);
 
@@ -611,11 +609,11 @@ void ArucoFractalTracker::imageCallback(const sensor_msgs::msg::Image::SharedPtr
 
   try
   {
-    image_pub_->publish(*cv_ptr->toImageMsg());
+    image_pub_->publish(*precision_landing::matToImageMsg(cv_ptr->image, msg->header, "mono8"));
   }
-  catch (cv_bridge::Exception& e)
+  catch (const std::exception& e)
   {
-    RCLCPP_ERROR_STREAM(this->get_logger(), "cv_bridge exception: " << e.what());
+    RCLCPP_ERROR_STREAM(this->get_logger(), "Error converting debug image: " << e.what());
     return;
   }
 }
