@@ -680,3 +680,47 @@ Average E2E Latency  : 12.0ms
 ```
 *Script cũng sẽ tự động xuất ra một hàng bảng Markdown chuẩn để bạn copy trực tiếp vào báo cáo hiệu năng.*
 
+## Phụ lục PL1: Hướng dẫn Quản lý Điện năng & Hiệu năng trên Jetson (nvpmodel & jetson_clocks)
+
+Để tối ưu hóa phần cứng Jetson Orin Nano cho các tác vụ thời gian thực (như Precision Landing) hoặc đưa về chế độ mặc định để tiết kiệm năng lượng và tăng tuổi thọ quạt tản nhiệt, bạn thực hiện theo hướng dẫn dưới đây.
+
+### 1. Công cụ nvpmodel (Quản lý các Chế độ Điện năng)
+`nvpmodel` quản lý các profile giới hạn công suất tiêu thụ (ví dụ: MAXN, 15W, 10W) bằng cách giới hạn số nhân CPU online và dải tần số (xung nhịp) tối đa của CPU/GPU/RAM.
+
+- **Xem chế độ hiện tại và danh sách tất cả các chế độ hỗ trợ:**
+  ```bash
+  sudo nvpmodel -q --verbose
+  ```
+- **Bật chế độ công suất tối đa (MAXN - Mode 0):**
+  *(Kích hoạt toàn bộ nhân CPU và GPU chạy ở giới hạn xung nhịp cao nhất. Dùng khi bay thử nghiệm hoặc xử lý nặng).*
+  ```bash
+  sudo nvpmodel -m 0
+  ```
+- **Quay về chế độ mặc định tiết kiệm điện (15W - Mode 1):**
+  *(Đưa Jetson về trạng thái tiêu thụ điện năng 15W mặc định khi xuất xưởng, giúp mát máy và tiết kiệm pin).*
+  ```bash
+  sudo nvpmodel -m 1
+  ```
+- *Lưu ý:* Cấu hình của `nvpmodel` được **tự động lưu vĩnh viễn** và tự áp dụng lại sau khi reboot.
+
+### 2. Công cụ jetson_clocks (Khóa cứng Xung nhịp & Tốc độ Quạt)
+`jetson_clocks` là một script tiện ích của NVIDIA dùng để vô hiệu hóa tính năng tự động điều tốc (DVFS) và ép cứng toàn bộ các thành phần (CPU, GPU, RAM) chạy ở tần số tối đa cho phép của chế độ `nvpmodel` đang hoạt động, đồng thời ép quạt quay 100% để đảm bảo làm mát.
+
+- **Xem thông số xung nhịp và tốc độ quạt thực tế hiện tại:**
+  ```bash
+  sudo jetson_clocks --show
+  ```
+- **Ép cứng hiệu năng tối đa (Bật):**
+  ```bash
+  sudo jetson_clocks
+  ```
+- **Tắt chế độ ép xung và quay về tự động điều tốc:**
+  ```bash
+  sudo jetson_clocks --restore
+  ```
+  *(Hoặc đơn giản là **khởi động lại máy (reboot)**, các thiết lập của `jetson_clocks` sẽ tự động bị xóa bỏ).*
+
+### 3. Khuyên dùng cho Bay Thử nghiệm & Vận hành thực tế
+- Do thuật toán của chúng ta đã được tối ưu hóa cực kỳ sâu (Zero-copy IPC, GStreamer NVDEC/VIC giải mã phần cứng), tải CPU tiêu thụ rất thấp (chỉ khoảng **12% - 18%**). 
+- Để bảo vệ tuổi thọ quạt tản nhiệt và tránh hao pin drone ngoài ý muốn, **khuyến cáo không cần chạy `jetson_clocks`** trong vận hành thực tế. Bạn chỉ cần bật `sudo nvpmodel -m 1` và để hệ điều hành tự động tăng giảm xung nhịp linh hoạt.
+
