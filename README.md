@@ -553,7 +553,7 @@ ros2 launch mavros px4.launch fcu_url:=udp://:14540@127.0.0.1:14580
 Kiểm tra MAVROS đã nối PX4:
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
+source ~/precision_landing_ws/install/setup.bash
 ros2 topic echo --once /mavros/state
 ```
 Kỳ vọng:
@@ -564,7 +564,7 @@ connected: true
 #### Terminal 3: Khởi động bridge camera, tracker và lander:
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
+source ~/precision_landing_ws/install/setup.bash
 ros2 launch precision_landing sitl_precland.launch.py
 ```
 
@@ -595,6 +595,92 @@ Chọn topic `/landing/annotated_image` từ thanh công cụ để theo dõi tr
       {command: 23, param1: 0.0, param2: 0.0, latitude: 47.3979298, longitude: 8.546217, altitude: 0.0} 
     ]}"
     ```
+
+---
+
+## 2.1. Hướng Dẫn Chạy Mô phỏng HITL / Đa máy tính (PC chạy Gazebo + Jetson chạy Thuật toán)
+
+Khi chạy mô phỏng cấu hình đa máy tính (PC chạy Gazebo SITL/HITL, Jetson đóng vai trò Companion Computer chạy toàn bộ pipeline nhận diện và điều khiển), luồng dữ liệu hình ảnh nặng sẽ được nén qua mạng Wifi/LAN để tránh giật lag.
+
+---
+
+### **BƯỚC 1: Thực hiện trên Máy PC (Host `teedee@teedee`)**
+
+#### 1. Terminal 1: Khởi động PX4 SITL & Mô phỏng Gazebo
+Mô phỏng 3D chạy trên PC để tận dụng GPU rời:
+```bash
+cd ~/PX4
+PX4_GZ_WORLD=fractal_aruco_landing PX4_GZ_NO_FOLLOW=1 make px4_sitl gz_x500_gimbal
+```
+
+#### 2. Terminal 2: Chạy Cầu nối (Bridges) và Nén ảnh cục bộ trên PC
+Bridge này nhận clock, camera_info và ảnh từ Gazebo. Nó nén ảnh thô từ camera mô phỏng thành ảnh JPEG nén phát qua mạng:
+```bash
+source /opt/ros/humble/setup.bash
+source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
+ros2 launch precision_landing pc_gz_bridge.launch.py
+```
+*   **Giải thích hoạt động**: Node `gz_image_bridge` lấy ảnh từ Gazebo đẩy vào topic nội bộ `/gimbal_camera_local` (không phát ra ngoài mạng). Node `image_compressor` nén ảnh này và phát ra topic mạng `/gimbal_camera/compressed` giúp tiết kiệm băng thông (từ 660 Mbps thô xuống còn 3 Mbps ảnh nén).
+
+---
+
+### **BƯỚC 2: Cấu hình mạng & MAVROS trên Jetson (Companion `jb2@ubuntu`)**
+
+*Lưu ý: PC và Jetson phải kết nối chung mạng LAN/Wifi, ping thông với nhau và được đặt chung một `ROS_DOMAIN_ID` trong file `.bashrc`.*
+
+#### 1. Terminal 1: Chạy MAVROS kết nối Jetson tới PX4
+*   **Nếu chạy mô phỏng SITL đa máy tính (nối qua mạng UDP)**:
+    ```bash
+    source /opt/ros/humble/setup.bash
+    # Thay <IP_CUA_PC> bằng IP thực tế của máy PC teedee (Ví dụ: 10.70.22.100)
+    ros2 launch mavros px4.launch fcu_url:=udp://:14540@<IP_CUA_PC>:14557
+    ```
+*   **Nếu chạy phần cứng HITL thực tế (nối với mạch Pixhawk qua cổng Serial)**:
+    ```bash
+    source /opt/ros/humble/setup.bash
+    ros2 launch mavros px4.launch fcu_url:=/dev/ttyTHS1:921600
+    ```
+
+#### 2. Terminal 2: Chạy bộ giải nén ảnh, Tracker và Controller trên Jetson
+Khởi chạy thuật toán nhận diện và điều khiển chính:
+```bash
+source /opt/ros/humble/setup.bash
+source ~/precision_landing_ws/install/setup.bash
+ros2 launch precision_landing hitl_precland.launch.py
+```
+*   **Giải thích hoạt động**: 
+    1.  Node `image_decompressor` giải nén ảnh từ topic mạng `/gimbal_camera/compressed` ra thành ảnh thô cục bộ `/gimbal_camera`.
+    2.  Node `aruco_fractal_tracker` xử lý ảnh thô cục bộ để phát hiện tọa độ marker.
+    3.  Node `offboard_precland_controller` nhận tọa độ và xuất lệnh OFFBOARD để điều khiển UAV.
+    4.  Node `debug_image_compressor` nén luồng ảnh kết quả vẽ đè HUD và phát lên mạng qua topic `/landing/annotated_image/compressed`.
+
+---
+
+### **BƯỚC 3: Giám sát & Kích hoạt bay tự động (Thực hiện trên PC `teedee@teedee`)**
+
+#### 1. Terminal 3: Xem ảnh camera HUD nhận diện thời gian thực (FPS cao, không lag)
+Khởi chạy công cụ trực quan hóa rqt:
+```bash
+source /opt/ros/humble/setup.bash
+ros2 run rqt_image_view rqt_image_view
+```
+*   **Chọn topic**: Từ danh sách thả xuống, chọn topic **`/landing/annotated_image/compressed`** để xem vòng tròn nhận diện và thông số latency không bị trễ hình.
+
+#### 2. Terminal 4: Nạp đường bay tự động để kích hoạt hạ cánh chính xác
+```bash
+source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
+
+# Khởi chạy node telemetry upload
+ros2 launch ros2_telemetry plan_upload.launch.py drone_id:=d1
+
+# Gọi service upload mission (bao gồm lệnh COMMAND_LAND=23 để drone tự động chuyển sang chế độ hạ cánh chính xác)
+ros2 service call /d1/mission_upload dib_msgs/srv/MissionUpload "{mission: [
+  {command: 22, param1: 0.0, param2: 0.0, latitude: 47.397929, longitude: 8.546217, altitude: 15.0},
+  {command: 16, param1: 5.0, param2: 0.0, latitude: 47.39797, longitude: 8.546322, altitude: 15.0}, 
+  {command: 16, param1: 5.0, param2: 0.0, latitude: 47.3979298, longitude: 8.546217, altitude: 15.0},
+  {command: 23, param1: 0.0, param2: 0.0, latitude: 47.3979298, longitude: 8.546217, altitude: 0.0} 
+]}"
+```
 
 ---
 
@@ -680,6 +766,8 @@ Average E2E Latency  : 12.0ms
 ```
 *Script cũng sẽ tự động xuất ra một hàng bảng Markdown chuẩn để bạn copy trực tiếp vào báo cáo hiệu năng.*
 
+---
+
 ## Phụ lục PL1: Hướng dẫn Quản lý Điện năng & Hiệu năng trên Jetson (nvpmodel & jetson_clocks)
 
 Để tối ưu hóa phần cứng Jetson Orin Nano cho các tác vụ thời gian thực (như Precision Landing) hoặc đưa về chế độ mặc định để tiết kiệm năng lượng và tăng tuổi thọ quạt tản nhiệt, bạn thực hiện theo hướng dẫn dưới đây.
@@ -723,4 +811,5 @@ Average E2E Latency  : 12.0ms
 ### 3. Khuyên dùng cho Bay Thử nghiệm & Vận hành thực tế
 - Do thuật toán của chúng ta đã được tối ưu hóa cực kỳ sâu (Zero-copy IPC, GStreamer NVDEC/VIC giải mã phần cứng), tải CPU tiêu thụ rất thấp (chỉ khoảng **12% - 18%**). 
 - Để bảo vệ tuổi thọ quạt tản nhiệt và tránh hao pin drone ngoài ý muốn, **khuyến cáo không cần chạy `jetson_clocks`** trong vận hành thực tế. Bạn chỉ cần bật `sudo nvpmodel -m 1` và để hệ điều hành tự động tăng giảm xung nhịp linh hoạt.
+
 
