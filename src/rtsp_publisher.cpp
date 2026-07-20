@@ -12,7 +12,7 @@ RtspPublisher::RtspPublisher(const rclcpp::NodeOptions & options)
   setenv("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp", 1);
 
   // Declare Parameters
-  this->declare_parameter<std::string>("rtsp_url", "rtsp://192.168.168.14:8554/main.264");
+  this->declare_parameter<std::string>("rtsp_url", "rtsp://192.168.168.16:8554/main.264");
   this->declare_parameter<std::string>("frame_id", "siyi_camera_optical_frame");
   this->declare_parameter<bool>("flip_180", true);
   this->declare_parameter<double>("target_fps", 30.0);

@@ -602,6 +602,13 @@ Chọn topic `/landing/annotated_image` từ thanh công cụ để theo dõi tr
 
 Khi chạy mô phỏng cấu hình đa máy tính (PC chạy Gazebo SITL/HITL, Jetson đóng vai trò Companion Computer chạy toàn bộ pipeline nhận diện và điều khiển), luồng dữ liệu hình ảnh nặng sẽ được nén qua mạng Wifi/LAN để tránh giật lag.
 
+Có **hai cách** để kết nối PC và Jetson:
+*   **Cách 1 (Đơn giản - Direct WiFi)**: Tất cả node dùng chung `ROS_DOMAIN_ID=0` và `ROS_LOCALHOST_ONLY=0`. FastDDS tự tìm nhau qua multicast. Không cần DDS Router.
+*   **Cách 2 (Có DDS Router)**: PC dùng `ROS_DOMAIN_ID=1`, Jetson dùng `ROS_DOMAIN_ID=3`. DDS Router đóng vai trò bridge WAN. Dùng khi cần kiểm soát chính xác topic nào được forward qua mạng.
+
+> [!IMPORTANT]
+> **Sai lầm phổ biến với DDS Router**: Nếu chạy `pc_gz_bridge.launch.py` trên PC mà không set `ROS_DOMAIN_ID=1`, node đó sẽ chạy trên domain 0. DDS Router Station chỉ nghe domain 1 → nó **không thấy** `/clock`, `/gimbal_camera/compressed` → không forward sang Jetson → node tracker/controller trên Jetson bị đứng im không nhận được dữ liệu nào.
+
 ---
 
 ### **BƯỚC 1: Thực hiện trên Máy PC (Host `teedee@teedee`)**
@@ -616,11 +623,53 @@ PX4_GZ_WORLD=fractal_aruco_landing PX4_GZ_NO_FOLLOW=1 make px4_sitl gz_x500_gimb
 #### 2. Terminal 2: Chạy Cầu nối (Bridges) và Nén ảnh cục bộ trên PC
 Bridge này nhận clock, camera_info và ảnh từ Gazebo. Nó nén ảnh thô từ camera mô phỏng thành ảnh JPEG nén phát qua mạng:
 ```bash
+# !! Quan trọng: phải set domain=1 để DDS Router Station nhận được topic này !!
+export ROS_DOMAIN_ID=1
+export ROS_LOCALHOST_ONLY=1
 source /opt/ros/humble/setup.bash
 source ~/PX4/examples/SITL_PrecisionLanding/ros2_ws/install/setup.bash
 ros2 launch precision_landing pc_gz_bridge.launch.py
 ```
 *   **Giải thích hoạt động**: Node `gz_image_bridge` lấy ảnh từ Gazebo đẩy vào topic nội bộ `/gimbal_camera_local` (không phát ra ngoài mạng). Node `image_compressor` nén ảnh này và phát ra topic mạng `/gimbal_camera/compressed` giúp tiết kiệm băng thông (từ 660 Mbps thô xuống còn 3 Mbps ảnh nén).
+
+---
+
+## Cách 1: Direct WiFi (Đơn giản, không cần DDS Router)
+
+Tất cả terminal trên **cả PC lẫn Jetson** đều set:
+```bash
+export ROS_DOMAIN_ID=0
+export ROS_LOCALHOST_ONLY=0
+```
+Sau đó chạy các bước bình thường bên dưới. FastDDS sẽ tự tìm thấy nhau qua mạng WiFi.
+
+---
+
+## Cách 2: DDS Router (Kiểm soát luồng dữ liệu qua WAN)
+
+> [!IMPORTANT]
+> **Yêu cầu Domain ID theo từng máy:**
+> *   **PC (`teedee`)**: `ROS_DOMAIN_ID=1` + `ROS_LOCALHOST_ONLY=1` (khớp với `StationLocal: domain=1` trong `ddsrouter_station.yaml`)
+> *   **Jetson (`jb2`)**: `ROS_DOMAIN_ID=3` + `ROS_LOCALHOST_ONLY=1` (đã set sẵn trong `.bashrc`)
+
+### **BƯỚC 0: Khởi động DDS Router trên cả hai máy (trước tiên)**
+
+> [!NOTE]
+> Cả hai file cấu hình đều nằm trên **Jetson** tại `~/DDS-Router/`:
+> *   `ddsrouter_drone.yaml` → chạy trên Jetson
+> *   `ddsrouter_station.yaml` → phải **copy sang PC** rồi mới chạy
+
+**Trên Jetson**: Khởi động DDS Router drone:
+```bash
+cd ~/DDS-Router
+./install/ddsrouter_tool/bin/ddsrouter -c ddsrouter_drone.yaml
+```
+
+**Trên PC**:
+```bash
+cd ~/DDS-Router
+./install/ddsrouter_tool/bin/ddsrouter -c ddsrouter_station.yaml
+```
 
 ---
 

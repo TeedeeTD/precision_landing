@@ -25,7 +25,9 @@ def generate_launch_description():
             ('in', '/gimbal_camera_local'),
             ('out/compressed', '/gimbal_camera/compressed')
         ],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{
+            'use_sim_time': True
+        }],
         output='screen'
     )
 

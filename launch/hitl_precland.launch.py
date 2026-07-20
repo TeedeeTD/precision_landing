@@ -17,7 +17,9 @@ def generate_launch_description():
             ('in/compressed', '/gimbal_camera/compressed'),
             ('out', '/gimbal_camera')
         ],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{
+            'use_sim_time': True
+        }],
         output='screen'
     )
 
@@ -72,7 +74,9 @@ def generate_launch_description():
             ('in', '/landing/annotated_image'),
             ('out/compressed', '/landing/annotated_image/compressed')
         ],
-        parameters=[{'use_sim_time': True}],
+        parameters=[{
+            'use_sim_time': True
+        }],
         output='screen'
     )
 

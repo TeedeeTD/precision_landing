@@ -50,7 +50,7 @@
     ctrl_hz: 30
     target_timeout: 5.0
     tracking_confirm: 10
-    align_confirm: 6
+    align_confirm: 10
     align_timeout: 10.0
     search_timeout: 10.0
     max_search: 3
@@ -59,10 +59,10 @@
     hacc_rad: 0.20
     max_align_step: 0.45
     max_descent_step: 0.35
-    servo_gain_high: 0.35
-    servo_gain_low: 0.75
-    sp_vel_max: 1.5
-    sp_accel_max: 2.0
+    servo_gain_high: 0.20
+    servo_gain_low: 0.1
+    sp_vel_max: 1.1
+    sp_accel_max: 1.5
 
     # --- PX4 Dynamic Descent Parameters ---
     mpc_land_alt1: 12.0
@@ -73,19 +73,19 @@
     mpc_land_crwl: 0.3
     high_alt: 8.0
     low_alt: 5.0
-    alpha_high: 0.18
-    alpha_low: 0.45
-    filter_window: 5
+    alpha_high: 0.15
+    alpha_low: 0.55
+    filter_window: 7
 
     # --- Dynamic Gates ---
     align_r_min: 0.25
     align_r_max: 4.0
     align_r_gain: 0.20
     align_r_bias: 0.15
-    desc_r_min: 0.1
+    desc_r_min: 0.15
     desc_r_max: 2.0
-    desc_r_gain: 0.12
-    desc_r_bias: 0.08
+    desc_r_gain: 0.15
+    desc_r_bias: 0.12
     reject_r_min: 1.0
     reject_r_max: 5.0
     reject_r_gain: 0.50

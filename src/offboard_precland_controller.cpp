@@ -972,19 +972,21 @@ void OffboardPreclandController::gimbal_tick()
 void OffboardPreclandController::control_loop()
 {
   double now = now_sec();
+  // Use steady clock (real-world wall-clock time) for the execution watchdog to avoid false triggers from sim clock jumps
+  double wall_now = std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
   if (last_loop_run_time_ > 0.0) {
-    double dt_loop = now - last_loop_run_time_;
+    double dt_loop = wall_now - last_loop_run_time_;
     if (dt_loop > 0.2) {
-      RCLCPP_WARN(this->get_logger(), "Watchdog: Control loop delayed abnormally by %.3fs!", dt_loop);
+      RCLCPP_WARN(this->get_logger(), "Watchdog: Control loop delayed abnormally by %.3fs (wall time)!", dt_loop);
       if (state_ != PrecLandState::IDLE && state_ != PrecLandState::DONE && state_ != PrecLandState::FALLBACK) {
         RCLCPP_ERROR(this->get_logger(), "Watchdog triggered: transitioning to FALLBACK");
         transition(PrecLandState::FALLBACK);
-        last_loop_run_time_ = now;
+        last_loop_run_time_ = wall_now;
         return;
       }
     }
   }
-  last_loop_run_time_ = now;
+  last_loop_run_time_ = wall_now;
 
   if (state_ == PrecLandState::FINAL_APPROACH) {
     if (!armed_) {
