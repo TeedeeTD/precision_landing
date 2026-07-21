@@ -94,6 +94,17 @@ def generate_launch_description():
                 ],
                 extra_arguments=[{'use_intra_process_comm': True}],
             ),
+            ComposableNode(
+                package='precision_landing',
+                plugin='precision_landing::ImageToRtsp',
+                name='image_to_rtsp',
+                parameters=[{
+                    'image_topic': '/siyi/fractal_debug',
+                    'rtsp_url': 'rtmp://127.0.0.1:1935/siyi_aruco',
+                    'fps': 25.0
+                }],
+                extra_arguments=[{'use_intra_process_comm': True}],
+            ),
         ],
         output='screen',
     )

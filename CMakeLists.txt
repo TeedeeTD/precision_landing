@@ -95,6 +95,19 @@ rclcpp_components_register_nodes(offboard_precland_controller_node "precision_la
 add_executable(offboard_precland_controller src/offboard_precland_controller_main.cpp)
 target_link_libraries(offboard_precland_controller offboard_precland_controller_node)
 
+# ── 4. Image to RTSP Component & Executable ───────────────────────────
+add_library(image_to_rtsp_node SHARED src/image_to_rtsp.cpp)
+ament_target_dependencies(image_to_rtsp_node
+  rclcpp
+  sensor_msgs
+  rclcpp_components
+  OpenCV
+)
+rclcpp_components_register_nodes(image_to_rtsp_node "precision_landing::ImageToRtsp")
+
+add_executable(image_to_rtsp src/image_to_rtsp_main.cpp)
+target_link_libraries(image_to_rtsp image_to_rtsp_node)
+
 # ── Custom Component Container (Forces OpenCV 4.8.0 linking) ─────────
 add_executable(precland_container src/precland_container.cpp)
 ament_target_dependencies(precland_container
@@ -103,7 +116,7 @@ ament_target_dependencies(precland_container
   OpenCV
 )
 
-# ── 4. Install Targets ────────────────────────────────────────────────
+# ── 5. Install Targets ────────────────────────────────────────────────
 install(
   DIRECTORY include/${PROJECT_NAME}
   DESTINATION include
@@ -114,6 +127,7 @@ install(
     aruco_fractal_tracker_node
     rtsp_publisher_node
     offboard_precland_controller_node
+    image_to_rtsp_node
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
@@ -125,11 +139,12 @@ install(
     aruco_fractal_tracker
     rtsp_publisher
     offboard_precland_controller
+    image_to_rtsp
     precland_container
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
-# ── 5. Install Config & Launch Files ──────────────────────────────────
+# ── 6. Install Config & Launch Files ──────────────────────────────────
 install(
   DIRECTORY config
   DESTINATION share/${PROJECT_NAME}
@@ -145,6 +160,7 @@ ament_export_libraries(
   aruco_fractal_tracker_node
   rtsp_publisher_node
   offboard_precland_controller_node
+  image_to_rtsp_node
 )
 
 ament_export_dependencies(

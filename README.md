@@ -731,13 +731,20 @@ ros2 service call /d1/mission_upload dib_msgs/srv/MissionUpload "{mission: [
 ]}"
 ```
 
----
-
 ## 3.0. Hướng Dẫn Chạy Test Trên Camera Thật (Real Camera RTSP)
 
-Để kiểm tra trực tiếp khả năng nhận diện Aruco Fractal của camera vật lý (SIYI A8 Mini hoặc bất kỳ camera IP nào) mà chưa cần chạy mô phỏng hay nối với Pixhawk, sử dụng launch file độc lập sau:
+Để kiểm tra trực tiếp khả năng nhận diện Aruco Fractal của camera vật lý (SIYI A8 Mini hoặc bất kỳ camera IP nào) mà không làm quá tải kết nối trực tiếp của camera và chưa cần kết nối với Pixhawk, thực hiện theo các bước sau. Hệ thống hỗ trợ truyền đồng thời **luồng ảnh thô (raw)** và **luồng ảnh nhận diện (detected)** qua MediaMTX.
 
-#### Terminal 1: Khởi động Camera Publisher và Aruco Tracker
+#### Terminal 0: Khởi động MediaMTX trên Jetson (Làm trạm phân phối luồng)
+MediaMTX sẽ kết nối tới camera SIYI vật lý (`192.168.168.16`) để kéo luồng RTSP về Jetson và phát lại (relay) tại cổng nội bộ nhằm tránh gián đoạn hoặc trễ khi có nhiều kết nối đồng thời:
+```bash
+cd ~/mediamtx
+./mediamtx mediamtx.yml
+```
+*Đảm bảo luồng camera đã được nhận diện và chuyển tiếp thành công tới địa chỉ cục bộ `rtsp://127.0.0.1:8554/my_camera`.*
+
+#### Terminal 1: Khởi động Camera Publisher, Aruco Tracker và Streamer
+Khởi động cụm node xử lý, tự động đẩy luồng ảnh đã được vẽ bounding box nhận diện (annotated image) ngược trở lại MediaMTX qua giao thức RTMP/RTSP:
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/precision_landing_ws/install/setup.bash
@@ -745,30 +752,47 @@ source ~/precision_landing_ws/install/setup.bash
 # Tham số enable_mavros:=false dùng để chạy khi chưa có kết nối mạch FCU
 ros2 launch precision_landing real_fractal_detect.launch.py enable_mavros:=false
 ```
+*Lưu ý: File cấu hình `~/precision_landing_ws/src/precision_landing/config/rtsp_publisher_params.yaml` đã được thiết lập để kết nối tới `rtsp://127.0.0.1:8554/my_camera` qua MediaMTX. Node `image_to_rtsp` sẽ tự động chuyển đổi ảnh detect `/siyi/fractal_debug` và đẩy sang MediaMTX tại địa chỉ `rtsp://127.0.0.1:8554/siyi_aruco`.*
 
-*Lưu ý: Nếu bạn muốn thay đổi địa chỉ RTSP hoặc thông số camera calibration (tiêu cự fx, fy, cx, cy), hãy chỉnh sửa tại file `~/precision_landing_ws/src/precision_landing/config/rtsp_publisher_params.yaml`.*
+#### Theo dõi luồng video từ máy tính trạm (PC/Laptop)
+Từ một máy tính khác cùng mạng WiFi/LAN, bạn có thể xem trực quan hai luồng video bằng nhiều cách:
 
-#### Terminal 2 (Tùy chọn): Nén luồng ảnh để truyền qua Wifi/Mạng (Tránh gián đoạn và trễ)
-Vì container chính đã lược bỏ dependency `cv_bridge` để tránh lỗi xung đột OpenCV ABI, luồng ảnh debug được đẩy trực tiếp dưới dạng ảnh thô (raw). Để xem mượt mà từ máy tính trạm hoặc qua Wifi, bạn chạy thêm một node trung gian độc lập để nén ảnh:
-```bash
-source /opt/ros/humble/setup.bash
-ros2 run image_transport republish raw compressed --ros-args --remap in:=/siyi/fractal_debug --remap out/compressed:=/siyi/fractal_debug/compressed
-```
+1. **Xem qua Trình duyệt Web (WebRTC - Khuyên dùng vì độ trễ thấp nhất)**
+   - **Xem trực tiếp từ Jetson** (Giả sử IP của Jetson là `<JETSON_IP>`, ví dụ `172.20.50.44`):
+     - Luồng thô (Raw): `http://<JETSON_IP>:8889/my_camera/`
+     - Luồng nhận dạng (Detected): `http://<JETSON_IP>:8889/siyi_aruco/`
+   - **Xem qua MediaMTX trung gian của PC** (Giả sử IP của PC là `<PC_IP>`, ví dụ `172.20.50.235` và bạn đã cấu hình MediaMTX ở bước dưới):
+     - Luồng thô (Raw): `http://<PC_IP>:8889/raw/`
+     - Luồng nhận dạng (Detected): `http://<PC_IP>:8889/detected/`
+     *(Lưu ý: Phải truy cập đúng tên đường dẫn tương ứng với tên path khai báo trong file cấu hình `.yml` của PC, ví dụ `/raw/` và `/detected/`).*
 
-#### Terminal 3: Theo dõi luồng ảnh Debug
-Mở rqt để xem luồng video từ camera kèm theo khung bounding box nhận diện marker:
-```bash
-source /opt/ros/humble/setup.bash
-ros2 run rqt_image_view rqt_image_view
-```
-*Chọn topic `/siyi/fractal_debug` (ảnh thô) hoặc `/siyi/fractal_debug/compressed` (ảnh nén nếu đã chạy Terminal 2).*
+2. **Xem qua địa chỉ RTSP (sử dụng VLC Player hoặc QGroundControl)**
+   - **Xem trực tiếp từ Jetson**:
+     - Luồng thô (Raw): `rtsp://<JETSON_IP>:8554/my_camera`
+     - Luồng nhận dạng (Detected): `rtsp://<JETSON_IP>:8554/siyi_aruco`
 
-Nếu bạn muốn kiểm tra luồng tọa độ (pose) nhận diện liên tục:
+3. **Cấu hình MediaMTX trên máy tính trạm** (để kéo luồng tự động về PC):
+   Thêm cấu hình sau vào phần cuối (`paths`) của file `mediamtx.yml` trên máy tính trạm:
+   ```yaml
+   paths:
+     # Luồng video thô từ Jetson
+     raw:
+       source: rtsp://172.20.50.44:8554/my_camera
+       sourceOnDemand: no
+     # Luồng video có vẽ bounding box detect Aruco từ Jetson
+     detected:
+       source: rtsp://172.20.50.44:8554/siyi_aruco
+       sourceOnDemand: no
+   ```
+   *(Thay đổi IP `172.20.50.44` thành IP thực tế của Jetson Orin Nano).*
+
+#### Kiểm tra luồng tọa độ (pose) nhận diện liên tục:
 ```bash
 source /opt/ros/humble/setup.bash
 source ~/precision_landing_ws/install/setup.bash
 ros2 topic echo /siyi/fractal_pose
 ```
+
 
 ---
 
@@ -861,4 +885,65 @@ Average E2E Latency  : 12.0ms
 - Do thuật toán của chúng ta đã được tối ưu hóa cực kỳ sâu (Zero-copy IPC, GStreamer NVDEC/VIC giải mã phần cứng), tải CPU tiêu thụ rất thấp (chỉ khoảng **12% - 18%**). 
 - Để bảo vệ tuổi thọ quạt tản nhiệt và tránh hao pin drone ngoài ý muốn, **khuyến cáo không cần chạy `jetson_clocks`** trong vận hành thực tế. Bạn chỉ cần bật `sudo nvpmodel -m 1` và để hệ điều hành tự động tăng giảm xung nhịp linh hoạt.
 
+### 4. Tự động kích hoạt hiệu năng tối đa khi khởi động (Permanent Boot Config)
+Nếu bạn muốn Jetson luôn tự động chạy ở hiệu năng cao nhất (MAXN - Mode 0) và khóa cứng xung nhịp `jetson_clocks` mỗi khi cấp nguồn hoặc khởi động lại mà không cần chạy thủ công, hãy thực hiện cấu hình vĩnh viễn như sau:
+
+#### Bước 4.1: Cố định nvpmodel MAXN
+Chạy lệnh cấu hình nvpmodel sang mode 0 một lần duy nhất. Hệ thống sẽ tự động lưu lại trạng thái này vĩnh viễn (lưu vào `/var/lib/nvpmodel/status` và được nạp lại thông qua `nvpmodel.service` lúc khởi động):
+```bash
+sudo nvpmodel -m 0
+```
+
+#### Bước 4.2: Tạo systemd Service để tự khởi chạy jetson_clocks
+Vì cấu hình của `jetson_clocks` sẽ bị mất sau khi reboot, chúng ta tạo một dịch vụ hệ thống (systemd) để chạy lệnh này tự động sau khi `nvpmodel` đã khởi động:
+
+1. **Tạo file cấu hình dịch vụ `/etc/systemd/system/jetson_clocks.service`:**
+   ```bash
+   sudo bash -c 'cat <<EOF > /etc/systemd/system/jetson_clocks.service
+   [Unit]
+   Description=Maximize Jetson Clocks
+   After=nvpmodel.service
+   Requires=nvpmodel.service
+
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/bin/jetson_clocks
+   RemainAfterExit=yes
+
+   [Install]
+   WantedBy=multi-user.target
+   EOF'
+   ```
+
+2. **Phân quyền và kích hoạt dịch vụ chạy cùng hệ thống:**
+   ```bash
+   sudo chmod 644 /etc/systemd/system/jetson_clocks.service
+   sudo systemctl daemon-reload
+   sudo systemctl enable jetson_clocks.service
+   ```
+
+3. **Khởi chạy thử nghiệm và kiểm tra trạng thái dịch vụ:**
+   ```bash
+   sudo systemctl start jetson_clocks.service
+   sudo systemctl status jetson_clocks.service
+   ```
+   *(Trạng thái hiển thị `Active: active (exited)` màu xanh nghĩa là dịch vụ đã hoạt động thành công và sẽ tự nạp lại khi có điện/reboot).*
+
+#### Bước 4.3: Hủy kích hoạt và xóa bỏ Service (Khi không muốn dùng nữa)
+Nếu muốn tắt tính năng tự động ép xung và xóa hoàn toàn dịch vụ này khỏi hệ thống, bạn chạy các lệnh sau:
+1. **Dừng và hủy kích hoạt dịch vụ chạy lúc khởi động:**
+   ```bash
+   sudo systemctl stop jetson_clocks.service
+   sudo systemctl disable jetson_clocks.service
+   ```
+2. **Xóa file service và reload lại cấu hình hệ thống:**
+   ```bash
+   sudo rm /etc/systemd/system/jetson_clocks.service
+   sudo systemctl daemon-reload
+   sudo systemctl reset-failed
+   ```
+3. **Đưa xung nhịp và quạt tản nhiệt về chế độ tự động điều tốc ngay lập tức (không cần reboot):**
+   ```bash
+   sudo jetson_clocks --restore
+   ```
 
