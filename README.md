@@ -182,10 +182,15 @@ Tầng trong cùng (Inner - Level 3): 3.125 cm (0.03125 m)
 `dib_box_landing_pad/model.sdf`, `marker_size` trong launch và marker vật lý phải luôn dùng cùng kích thước. Detector sử dụng `custom_fractal.yml`; file này được sync sang PX4 cùng model.
 
 * **Cập nhật file:**
-  Ghi đè trực tiếp giá trị <horizontal_fov>1.4137</horizontal_fov> vào file
+  Ghi đè trực tiếp giá trị `<horizontal_fov>1.4137</horizontal_fov>` vào file
   ```bash
   /home/teedee/PX4/Tools/simulation/gz/models/gimbal/model.sdf trên đĩa.
   ```
+
+  > [!WARNING]
+  > **Lưu ý quan trọng khi chạy `make distclean`:**
+  > Khi thực hiện `make distclean` hoặc dọn dẹp môi trường build PX4, file `model.sdf` của gimbal sẽ bị reset về giá trị mặc định. Bạn **bắt buộc phải kiểm tra và cập nhật lại** giá trị `<horizontal_fov>1.4137</horizontal_fov>` trong file `/home/teedee/PX4/Tools/simulation/gz/models/gimbal/model.sdf` trước khi khởi động lại mô phỏng SITL/HITL, nếu không node `aruco_fractal_tracker` sẽ sử dụng sai thông số FOV camera dẫn tới việc không thể ước lượng chính xác vị trí marker.
+
 
 * **Terminal 1: Khởi động PX4 SITL**
 
@@ -619,6 +624,14 @@ Mô phỏng 3D chạy trên PC để tận dụng GPU rời:
 cd ~/PX4
 PX4_GZ_WORLD=fractal_aruco_landing PX4_GZ_NO_FOLLOW=1 make px4_sitl gz_x500_gimbal
 ```
+Trong terminal này, khi PX4 chạy ổn định, chạy thêm cầu nối địa chỉ nhận GCS từ Jetson sang:
+```
+mavlink start -u 14581 -o 14540 -t <CompanionPC_IP_Address> -m onboard
+```
+ở đây hiện tại sẽ là
+```
+mavlink start -u 14581 -o 14540 -t 172.20.50.44 -m onboard
+```
 
 #### 2. Terminal 2: Chạy Cầu nối (Bridges) và Nén ảnh cục bộ trên PC
 Bridge này nhận clock, camera_info và ảnh từ Gazebo. Nó nén ảnh thô từ camera mô phỏng thành ảnh JPEG nén phát qua mạng:
@@ -662,12 +675,14 @@ Sau đó chạy các bước bình thường bên dưới. FastDDS sẽ tự tì
 **Trên Jetson**: Khởi động DDS Router drone:
 ```bash
 cd ~/DDS-Router
+source install/setup.bash
 ./install/ddsrouter_tool/bin/ddsrouter -c ddsrouter_drone.yaml
 ```
 
 **Trên PC**:
 ```bash
 cd ~/DDS-Router
+source install/setup.bash
 ./install/ddsrouter_tool/bin/ddsrouter -c ddsrouter_station.yaml
 ```
 
