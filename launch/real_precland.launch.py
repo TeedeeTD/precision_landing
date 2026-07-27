@@ -1,68 +1,57 @@
 """
-Launch file: Real SIYI A8 Mini + Fractal ArUco Tracker + Offboard Precision Landing Controller + MAVROS (All C++)
+Launch file: Real Drone Precision Landing Pipeline (Hardware Flight)
+Note: MAVROS is run externally (e.g. `ros2 launch mavros px4.launch fcu_url:=/dev/ttyTHS1:921600`)
 
 Pipeline:
-  1. MAVROS — connects to FCU (optional, can skip if no FCU connected)
-  2. Composable Node Container — Runs RtspPublisher, ArucoFractalTracker, and OffboardPreclandController in a single process with Zero-copy IPC.
+  - SIYI A8 Mini RTSP Publisher (GPU Accelerated NVDEC + flip 180 via GStreamer)
+  - Fractal ArUco C++ Tracker (Multi-level nested target tracking)
+  - Offboard Precision Landing Controller C++ (MAVROS Offboard setpoint control)
+  - ImageToRtsp C++ (Zero-latency RTMP/RTSP stream output to MediaMTX)
+  - Zero-Copy Intra-Process Communication via ComposableNodeContainer
 """
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
 from launch_ros.actions import ComposableNodeContainer
 from launch_ros.descriptions import ComposableNode
-from launch.actions import IncludeLaunchDescription
-from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 from ament_index_python.packages import get_package_share_directory
-
-
-def _launch_bool(value: str) -> bool:
-    return value.lower() in ('1', 'true', 'yes', 'on')
-
-
-def _maybe_start_mavros(context):
-    if not _launch_bool(LaunchConfiguration('enable_mavros').perform(context)):
-        return []
-
-    mavros_dir = get_package_share_directory('mavros')
-    return [
-        IncludeLaunchDescription(
-            XMLLaunchDescriptionSource(
-                os.path.join(mavros_dir, 'launch', 'px4.launch')
-            ),
-            launch_arguments={
-                'fcu_url': LaunchConfiguration('fcu_url'),
-            }.items(),
-        )
-    ]
 
 
 def generate_launch_description():
     pkg_share = get_package_share_directory('precision_landing')
     rtsp_params_file = os.path.join(pkg_share, 'config', 'rtsp_publisher_params.yaml')
     offboard_params_file = os.path.join(pkg_share, 'config', 'offboard_precland_params.yaml')
+    default_marker_config = os.path.join(pkg_share, 'config', 'custom_fractal.yml')
 
     # ── Launch Arguments ────────────────────────────────────────────
 
-    enable_mavros_arg = DeclareLaunchArgument(
-        'enable_mavros',
+    rtsp_url_arg = DeclareLaunchArgument(
+        'rtsp_url',
+        default_value='rtsp://127.0.0.1:8554/my_camera',
+        description='Input RTSP camera stream URL from MediaMTX or direct camera (e.g. rtsp://192.168.168.16:8554/main.264)'
+    )
+
+    flip_180_arg = DeclareLaunchArgument(
+        'flip_180',
         default_value='true',
-        description='Enable MAVROS node (set false if no FCU connected)'
+        description='Flip camera image 180 degrees (true if camera is mounted upside down on drone)'
     )
 
-    fcu_url_arg = DeclareLaunchArgument(
-        'fcu_url',
-        default_value='udp://:14540@127.0.0.1:14580',
-        description='MAVROS FCU URL (e.g. /dev/ttyACM0:57600 for USB Pixhawk)'
+    stream_output_url_arg = DeclareLaunchArgument(
+        'stream_output_url',
+        default_value='rtmp://127.0.0.1:1935/siyi_aruco',
+        description='Output RTMP stream URL pushing annotated debug video to MediaMTX'
     )
 
-    # ── 1. MAVROS (optional) ────────────────────────────────────────
+    marker_config_arg = DeclareLaunchArgument(
+        'marker_configuration',
+        default_value=default_marker_config,
+        description='Absolute path to fractal marker YAML configuration file'
+    )
 
-    mavros_launch = OpaqueFunction(function=_maybe_start_mavros)
-
-    # ── 2. Composable Node Container (Intra-Process Communication) ──
+    # ── Composable Node Container (Zero-Copy Intra-Process IPC) ──
 
     precland_container = ComposableNodeContainer(
         name='precision_landing_container',
@@ -70,13 +59,22 @@ def generate_launch_description():
         package='precision_landing',
         executable='precland_container',
         composable_node_descriptions=[
+            # 1. RTSP Camera Publisher (Decodes RTSP stream from camera/MediaMTX)
             ComposableNode(
                 package='precision_landing',
                 plugin='precision_landing::RtspPublisher',
                 name='siyi_rtsp_publisher',
-                parameters=[rtsp_params_file],
+                parameters=[
+                    rtsp_params_file,
+                    {
+                        'rtsp_url': LaunchConfiguration('rtsp_url'),
+                        'flip_180': LaunchConfiguration('flip_180'),
+                    }
+                ],
                 extra_arguments=[{'use_intra_process_comm': True}],
             ),
+
+            # 2. ArUco Fractal Tracker (Multi-level target detection & 3D pose estimation)
             ComposableNode(
                 package='precision_landing',
                 plugin='fractal_tracker::ArucoFractalTracker',
@@ -84,11 +82,7 @@ def generate_launch_description():
                 parameters=[
                     offboard_params_file,
                     {
-                        'marker_configuration': os.path.join(
-                            get_package_share_directory('precision_landing'),
-                            'config',
-                            'custom_fractal.yml'
-                        ),
+                        'marker_configuration': LaunchConfiguration('marker_configuration'),
                         'use_sim_time': False,
                     }
                 ],
@@ -101,6 +95,8 @@ def generate_launch_description():
                 ],
                 extra_arguments=[{'use_intra_process_comm': True}],
             ),
+
+            # 3. Offboard Precision Landing Controller (FSM Guidance to PX4 via MAVROS)
             ComposableNode(
                 package='precision_landing',
                 plugin='precision_landing::OffboardPreclandController',
@@ -116,13 +112,15 @@ def generate_launch_description():
                 ],
                 extra_arguments=[{'use_intra_process_comm': True}],
             ),
+
+            # 4. Image to RTSP Streamer (Pushes HUD annotated video back to MediaMTX via RTMP)
             ComposableNode(
                 package='precision_landing',
                 plugin='precision_landing::ImageToRtsp',
                 name='image_to_rtsp',
                 parameters=[{
                     'image_topic': '/siyi/fractal_debug',
-                    'rtsp_url': 'rtmp://127.0.0.1:1935/siyi_aruco',
+                    'rtsp_url': LaunchConfiguration('stream_output_url'),
                     'fps': 25.0
                 }],
                 extra_arguments=[{'use_intra_process_comm': True}],
@@ -132,8 +130,11 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        enable_mavros_arg,
-        fcu_url_arg,
-        mavros_launch,
+        rtsp_url_arg,
+        flip_180_arg,
+        stream_output_url_arg,
+        marker_config_arg,
         precland_container,
     ])
+
+

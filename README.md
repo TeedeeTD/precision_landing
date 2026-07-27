@@ -603,7 +603,7 @@ Chọn topic `/landing/annotated_image` từ thanh công cụ để theo dõi tr
 
 ---
 
-## 2.1. Hướng Dẫn Chạy Mô phỏng HITL / Đa máy tính (PC chạy Gazebo + Jetson chạy Thuật toán)
+## 2.5. Hướng Dẫn Chạy Mô phỏng HITL / Đa máy tính (PC chạy Gazebo + Jetson chạy Thuật toán)
 
 Khi chạy mô phỏng cấu hình đa máy tính (PC chạy Gazebo SITL/HITL, Jetson đóng vai trò Companion Computer chạy toàn bộ pipeline nhận diện và điều khiển), luồng dữ liệu hình ảnh nặng sẽ được nén qua mạng Wifi/LAN để tránh giật lag.
 
@@ -853,6 +853,119 @@ Average E2E Latency  : 12.0ms
 ==================================================
 ```
 *Script cũng sẽ tự động xuất ra một hàng bảng Markdown chuẩn để bạn copy trực tiếp vào báo cáo hiệu năng.*
+
+---
+
+## 5.0. Hướng Dẫn Chạy Full Trên Hệ Thống Phần Cứng Hoàn Toàn Không Mô Phỏng (Real Flight)
+
+Hướng dẫn này thực hiện điều khiển bay và hạ cánh chính xác hoàn toàn trên phần cứng thật: **Drone + Mạch Pixhawk FCU + Jetson Orin/Xavier Companion Computer + Camera SIYI A8 Mini (RTSP) + MediaMTX + MAVROS + QGroundControl (PC mặt đất)**.
+
+### Sơ đồ Kiến trúc & Kết nối Dữ liệu (Hardware Topology):
+```text
+[Camera SIYI A8 Mini]  --(RTSP/Ethernet)--> [MediaMTX @ Jetson]
+                                                  | (RTSP Input)
+[Pixhawk FCU (PX4)] <-- (Serial TELEM2 @ 921600) -- [Jetson Orin Nano]
+       |                                          |-- MAVROS (Serial/UDP)
+       | (WiFi/MAVLink Telemetry)                 |-- precland_container (C++ Zero-Copy)
+       v                                          |   |-- RtspPublisher (GPU NVDEC)
+[QGroundControl @ PC] <--(WebRTC/RTSP Viewer)-----|   |-- ArucoFractalTracker (Nested Marker)
+                                                      |-- OffboardPreclandController (FSM)
+                                                      |-- ImageToRtsp (RTMP Stream)
+```
+
+---
+
+### Quy Trình Vận Hành Từng Bước Trên Hệ Thống Thật:
+
+#### Bước 1: Khởi động MediaMTX trên Companion Computer (Jetson)
+MediaMTX đóng vai trò trạm relay luồng video từ camera SIYI vật lý (`192.168.168.16`) và làm server phân phối luồng video HUD overlay qua WebRTC/RTSP.
+```bash
+cd ~/mediamtx
+./mediamtx mediamtx.yml
+```
+*Đảm bảo luồng camera thô đã sẵn sàng tại `rtsp://127.0.0.1:8554/my_camera`.*
+
+#### Bước 2: Khởi động MAVROS độc lập kết nối Pixhawk FCU
+Mở một Terminal mới trên Jetson để chạy MAVROS. Chọn 1 trong 2 cách kết nối phù hợp với hệ thống của bạn:
+
+* **Cách A: Truyền telemetry về PC mặt đất qua WiFi (Khuyên dùng)**:
+  ```bash
+  source /opt/ros/humble/setup.bash
+  # Thay <PC_IP> bằng IP thực tế của máy tính trạm QGroundControl (Ví dụ: 192.168.1.100)
+  ros2 launch mavros px4.launch \
+    fcu_url:=/dev/ttyTHS1:921600 \
+    gcs_url:=udp://@<PC_IP>:14550
+  ```
+* **Cách B: Sử dụng kết nối UDP Local (nếu chạy MAVLink bridge nội bộ) (Đang dùng trên Panther)**:
+  ```bash
+  source /opt/ros/humble/setup.bash
+  ros2 launch mavros px4.launch fcu_url:=udp://:14541@127.0.0.1:14540
+  ```
+
+Kiểm tra kết nối MAVROS với Pixhawk:
+```bash
+ros2 topic echo --once /mavros/state
+```
+*Kỳ vọng: `connected: true`.*
+
+#### Bước 3: Khởi động Container Precision Landing (Vision + Controller + Streamer)
+Mở một Terminal mới trên Jetson để chạy toàn bộ pipeline C++ hạ cánh chính xác qua file [real_precland.launch.py](file:///home/teedee/github_ws/precision_landing/launch/real_precland.launch.py):
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/precision_landing_ws/install/setup.bash
+
+ros2 launch precision_landing real_precland.launch.py \
+  rtsp_url:=rtsp://127.0.0.1:8554/my_camera \
+  flip_180:=true \
+  stream_output_url:=rtmp://127.0.0.1:1935/siyi_aruco
+```
+
+#### Bước 4: Giám sát Trực quan và Điều khiển từ Máy tính Mặt đất (PC / GCS)
+
+1. **Theo dõi luồng ảnh bám bắt có HUD Overlay (Không dùng rqt)**:
+   Mở trình duyệt Web (Chrome / Firefox / Safari) trên PC hoặc thiết bị cầm tay kết nối chung mạng WiFi với Jetson (`<JETSON_IP>`):
+   - **Xem luồng nhận dạng bám bắt (Annotated HUD)**: `http://<JETSON_IP>:8889/siyi_aruco/`
+   - **Xem luồng camera thô (Raw Camera)**: `http://<JETSON_IP>:8889/my_camera/`
+   - *(Hoặc xem qua RTSP bằng VLC Player: `rtsp://<JETSON_IP>:8554/siyi_aruco`)*
+
+2. **Giám sát Trạng thái FSM và Tần số Setpoint**:
+   - Kiểm tra FSM Controller:
+     ```bash
+     ros2 topic echo /offboard_precland_controller/state
+     ```
+   - Kiểm tra tần số setpoint gửi sang MAVROS (đạt >= 20Hz - target 30Hz):
+     ```bash
+     ros2 topic hz /mavros/setpoint_position/local
+     ```
+
+3. **Kích hoạt Chế độ Hạ Cánh Chính Xác**:
+   - Cất cánh drone lên độ cao an toàn (Ví dụ: 8m - 12m) bằng chế độ Position / Mission.
+   - Bay drone tới vùng phụ cận có đặt marker Fractal ArUco.
+   - Chuyển chế độ bay sang **OFFBOARD** (hoặc gửi lệnh trigger/switch mode từ QGroundControl). Controller sẽ tự động bám đuổi marker, hạ độ cao dần theo từng tầng marker lồng nhau và đáp chính xác xuống tâm marker.
+
+---
+
+### Danh Mục Kiểm Tra An Toàn Trước Khi Bay Thật (Pre-flight Checklist):
+
+> [!IMPORTANT]
+> **Bắt buộc kiểm tra 4 điểm dưới đây trước khi bật công tắc OFFBOARD trên thực địa:**
+
+1. **Kích thước Marker Thực tế (`marker_size`)**:
+   - Kiểm tra tấm Fractal Marker in ra thực tế. Đo kích thước viền ngoài cùng (Level 1).
+   - Nếu kích thước là `0.50m` (50cm), giữ nguyên `marker_size: 0.50` trong `config/offboard_precland_params.yaml`.
+   - Nếu kích thước thực tế khác (ví dụ `0.40m`), bắt buộc sửa `marker_size` trong file YAML cho đúng kích thước thực tế để khoảng cách 3D (Z altitude) không bị tính toán sai.
+
+2. **Chiều Lật Ảnh Camera (`flip_180`)**:
+   - Mở luồng ảnh WebRTC `http://<JETSON_IP>:8889/siyi_aruco/` trên máy tính.
+   - Giơ thử marker hoặc nhấc drone lên di chuyển: Đảm bảo hình ảnh hiển thị đúng chiều không bị lộn ngược đầu đuôi.
+
+3. **Tọa độ Lệch Tâm Camera so với Tâm Drone (`camera_offset`)**:
+   - Kiểm tra thông số `camera_offset_x`, `camera_offset_y`, `camera_offset_z` trong `config/offboard_precland_params.yaml` khớp với vị trí gá lắp thực tế của ống kính camera so với tâm trọng tâm (CG) của drone.
+
+4. **Công Tắc Ngắt Chế Độ An Toàn Trên Tay Điều Khiển (RC Kill / Manual Override Switch)**:
+   - Gán sẵn công tắc chuyển đổi chế độ bay (Flight Mode Switch) trên Tay điều khiển (RC Transmitter) sang chế độ **Position Hold** hoặc **Altitude / Stabilized**.
+   - Trong quá trình hạ cánh tự động nếu có chướng ngại vật hoặc gió quá lớn, phi công chỉ cần gạt công tắc RC sang Position Mode là tay điều khiển lấy lại quyền lái ngay lập tức.
 
 ---
 
