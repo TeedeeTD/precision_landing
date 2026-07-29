@@ -1,0 +1,21 @@
+/**:
+  ros__parameters:
+    # --- FSM Configuration Constants ---
+    ctrl_hz: 30
+    target_timeout: 5.0
+    tracking_confirm: 10
+    align_confirm: 10
+    align_timeout: 10.0
+    search_timeout: 10.0
+    max_search: 3
+    descent_rate: 0.70
+    fappr_alt: 0.5
+    hacc_rad: 0.20
+    filter_window: 7
+
+    # --- Losses and Hold ---
+    target_loss_grace: 1.5
+    descent_loss_hold: 3.0
+    low_alt_max_err: 0.1
+    search_alt: 10.0
+    search_alt_max: 11.0

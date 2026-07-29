@@ -1,0 +1,10 @@
+/**:
+  ros__parameters:
+    # --- Topics ---
+    target_topic: "/landing/target_camera"
+    target_pose_topic: "/aruco_fractal_tracker/poses"
+
+    # --- Mode / Limits ---
+    land_mode: 2
+    abort_alt: 0.3
+    final_alt: 0.2

@@ -77,7 +77,14 @@ add_executable(rtsp_publisher src/rtsp_publisher_main.cpp)
 target_link_libraries(rtsp_publisher rtsp_publisher_node)
 
 # ── 3. Offboard Precland Controller Component & Executable ─────────────
-add_library(offboard_precland_controller_node SHARED src/offboard_precland_controller.cpp)
+add_library(offboard_precland_controller_node SHARED
+  src/offboard_precland_controller.cpp
+  src/modules/gimbal_controller.cpp
+  src/modules/precision_land_fsm.cpp
+  src/modules/guidance_controller.cpp
+  src/modules/target_tracker.cpp
+  src/modules/vehicle_interface.cpp
+)
 ament_target_dependencies(offboard_precland_controller_node
   rclcpp
   geometry_msgs

@@ -1,0 +1,32 @@
+/**:
+  ros__parameters:
+    # --- Servo Gain & Kinematic Limits ---
+    servo_gain_high: 0.20
+    servo_gain_low: 0.10
+    sp_vel_max: 1.1
+    sp_accel_max: 1.5
+    max_align_step: 0.45
+    max_descent_step: 0.35
+
+    final_approach_timeout: 8.0
+    final_descent_rate: 0.20
+    final_align_step: 0.05
+
+    # --- Yaw Control ---
+    align_yaw_to_tag: true
+    tag_yaw_sign: 1.0
+    tag_yaw_offset: 0.0
+    yaw_slew_rate: 0.60
+    yaw_lock_samples: 30
+    yaw_lock_alt: 7.0
+    yaw_lock_alt_2: 3.0
+    yaw_lock_timeout: 10.0
+    yaw_lock_min_samples: 10
+
+    # --- PX4 Dynamic Descent Parameters ---
+    mpc_land_alt1: 12.0
+    mpc_land_alt2: 7.0
+    mpc_land_alt_crawl: 2.0
+    mpc_z_vel_max_dn: 1.50
+    mpc_land_speed: 0.70
+    mpc_land_crwl: 0.30
