@@ -1075,3 +1075,29 @@ Nếu muốn tắt tính năng tự động ép xung và xóa hoàn toàn dịch
    sudo jetson_clocks --restore
    ```
 
+---
+
+## Phụ lục PL2: Hướng dẫn Can thiệp Thủ công & Giành lại Quyền Điều khiển (Manual RC Override)
+
+Trong quá trình hạ cánh tự động (chế độ **OFFBOARD**), phi công có thể chiếm lại quyền điều khiển thủ công từ tay cầm RC bất kỳ lúc nào bằng 2 cơ chế sau:
+
+### 1. Cơ chế 1: Gạt công tắc chuyển Chế độ bay (Flight Mode Switch)
+* **Cách thực hiện:** Phi công gạt công tắc chuyển chế độ bay trên tay cầm RC sang **`Position Mode` (POSCTL)**, **`Altitude Mode` (ALTCTL)** hoặc **`Stabilized`**.
+* **Tác dụng:** Lập tức ngắt chế độ `OFFBOARD`. Firmware PX4 trao toàn quyền điều khiển thủ công lại cho tay cầm RC.
+* **Độ ưu tiên:** Tuyệt đối (phần cứng & firmware PX4 luôn ưu tiên công tắc RC hơn lệnh từ ROS 2).
+
+### 2. Cơ chế 2: Đẩy cần gạt điều khiển (RC Stick Override)
+Mặc định trong PX4, tính năng tự động ngắt OFFBOARD khi đẩy cần gạt bị tắt (`COM_RC_OVERRIDE` mặc định `= 1`). Để cho phép phi công đẩy nhẹ cần gạt là tự ngắt OFFBOARD:
+
+#### Cấu hình tham số trên QGroundControl (QGC):
+1. Kết nối drone với **QGroundControl**.
+2. Vào **Vehicle Setup** $\rightarrow$ **Parameters**.
+3. Tìm kiếm tham số: **`COM_RC_OVERRIDE`**.
+4. Chuyển giá trị từ `1` sang **`3`** (tương ứng tích chọn cả `Auto modes` và `Offboard mode`).
+5. Reboot hoặc Lưu tham số vào PX4.
+
+#### Tác dụng & Hướng dẫn sử dụng:
+* **Tác dụng:** Khi `COM_RC_OVERRIDE = 3`, nếu drone đang tự động hạ cánh ở chế độ `OFFBOARD`, phi công chỉ cần đẩy nhẹ cần gạt (Roll, Pitch, Yaw hoặc Throttle) vượt quá $30\%$, PX4 sẽ tự động ngắt `OFFBOARD` và chuyển ngay sang chế độ **`Position Mode`**.
+* **Hướng dẫn điều khiển:** Sau khi ngắt thành công, phi công sử dụng cần gạt tay cầm RC để tự bay đứng yên, di chuyển hoặc hạ cánh bằng tay an toàn.
+
+
