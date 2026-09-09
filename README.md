@@ -1100,4 +1100,45 @@ Mặc định trong PX4, tính năng tự động ngắt OFFBOARD khi đẩy c�
 * **Tác dụng:** Khi `COM_RC_OVERRIDE = 3`, nếu drone đang tự động hạ cánh ở chế độ `OFFBOARD`, phi công chỉ cần đẩy nhẹ cần gạt (Roll, Pitch, Yaw hoặc Throttle) vượt quá $30\%$, PX4 sẽ tự động ngắt `OFFBOARD` và chuyển ngay sang chế độ **`Position Mode`**.
 * **Hướng dẫn điều khiển:** Sau khi ngắt thành công, phi công sử dụng cần gạt tay cầm RC để tự bay đứng yên, di chuyển hoặc hạ cánh bằng tay an toàn.
 
+---
+
+## Phụ lục PL3: Xử lý Vấn đề Rãnh đứt (Gap/Seam) trên Landing Pad bằng Tiền Xử Lý Hình Thái Học (Morphology Preprocessing)
+
+### 1. Mô tả Vấn đề
+Khi dán **Fractal ArUco Marker** lên nắp Trạm / Landing Box có cơ chế mở 4 cánh cửa, khe hở rãnh màu trắng (hình chữ thập `+`) cắt ngang đường viền đen outer border của **Marker lớn nhất (ID 0)**.
+* **Hậu quả:** Đường viền đen bị đứt đoạn thành 4 khối L riêng biệt, khiến thuật toán quét contour (`cv::findContours`) trong OpenCV / ArUco không thể nhận diện được hình vuông outer border của Marker ID 0 khi UAV ở độ cao lớn (Z > 3m).
+
+### 2. Giải pháp Kỹ thuật (Morphology Opening)
+Node `aruco_fractal_tracker` tích hợp bộ lọc **Hình thái học (Morphology Opening)** trên ảnh xám (Grayscale) trước khi đưa ảnh vào ArUco detector:
+* **Nguyên lý:** Trong ảnh xám OpenCV (Màu đen = 0, Màu trắng = 255), phép toán `cv::MORPH_OPEN` (`cv::erode` làm nở màu đen `0`, sau đó `cv::dilate` thu nhỏ lại) giúp vùng màu đen ở 2 bên khe hở "tràn" qua lấp đầy rãnh trắng mà không làm thay đổi tổng thể kích thước marker.
+* **Kết quả:** Nối liền đường viền đen đứt đoạn thành 1 contour khép kín liên tục, khôi phục khả năng detect Marker ID 0 từ xa/trên cao.
+
+### 3. Hướng dẫn Chạy Test & Tinh chỉnh trên Webcam Laptop / Camera Thực
+Hệ thống cung cấp file launch tiện lợi kèm theo các tham số tinh chỉnh kernel làm mờ trực tiếp:
+
+#### Step 1: Khởi chạy Test với Webcam
+```bash
+source /opt/ros/humble/setup.bash
+source ~/precision_landing_ws/install/setup.bash
+
+# Khởi chạy webcam kèm bộ lọc lấp rãnh (mặc định kernel size = 7)
+ros2 launch precision_landing webcam_detect.launch.py morphology_kernel_size:=7
+```
+
+#### Step 2: Tinh chỉnh Kích thước Kernel theo Rãnh hở thực tế
+Nếu rãnh hở trên nắp pad chiếm bề rộng nhiều pixel hơn trên camera:
+* Tăng `morphology_kernel_size` lên `9`, `11` hoặc `15`:
+  ```bash
+  ros2 launch precision_landing webcam_detect.launch.py morphology_kernel_size:=11
+  ```
+  *(Lưu ý: Không đặt kernel quá lớn > 31 vì sẽ làm nhòe mất ma trận bit mã hóa bên trong marker).*
+
+#### Step 3: Kiểm tra Trực quan Ảnh Sau Xử lý (Debug Topic)
+Mở cửa sổ xem ảnh trực tiếp sau khi qua bộ lọc lấp rãnh tại topic `/siyi/preprocessed_image`:
+```bash
+ros2 run rqt_image_view rqt_image_view /siyi/preprocessed_image
+```
+*(Nếu thấy đường viền đen đã nối liền rãnh trắng trên cửa sổ `/siyi/preprocessed_image`, Marker ID 0 sẽ được nhận diện thành công trên cửa sổ `/siyi/fractal_debug`).*
+
+
 

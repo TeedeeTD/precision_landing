@@ -50,6 +50,7 @@ private:
   rclcpp::Subscription<dib_msgs::msg::BoxTelemetry>::SharedPtr box_telemetry_sub_;
 
   rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr preprocessed_image_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr marker_pose_pub_;
   rclcpp::Publisher<dib_msgs::msg::LandingTarget6D>::SharedPtr target_pub_;
   std::shared_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
@@ -76,6 +77,8 @@ private:
   tf2::Vector3 last_tvec_{0.0, 0.0, 0.0};
   bool show_latency_overlay_{true};
   double latency_warn_ms_{100.0};
+  bool enable_morphology_{true};
+  int morphology_kernel_size_{5};
   size_t frame_count_{0};
   size_t detection_count_{0};
   double last_processing_latency_ms_{0.0};

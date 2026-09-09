@@ -21,6 +21,8 @@
     lost_bad_frames: 10
     show_latency_overlay: true
     latency_warn_ms: 100.0
+    enable_morphology: true
+    morphology_kernel_size: 5
 
 
     # --- Topics ---

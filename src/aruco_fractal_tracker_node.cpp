@@ -46,6 +46,8 @@ ArucoFractalTracker::ArucoFractalTracker(const rclcpp::NodeOptions &options)
   this->declare_parameter<int>("lost_bad_frames", 3);
   this->declare_parameter<bool>("show_latency_overlay", true);
   this->declare_parameter<double>("latency_warn_ms", 100.0);
+  this->declare_parameter<bool>("enable_morphology", true);
+  this->declare_parameter<int>("morphology_kernel_size", 5);
   this->declare_parameter<double>("camera_x_to_body_east_sign", -1.0);
   this->declare_parameter<double>("camera_y_to_body_north_sign", 1.0);
   this->declare_parameter<double>("camera_offset_x", 0.1517);
@@ -61,6 +63,8 @@ ArucoFractalTracker::ArucoFractalTracker(const rclcpp::NodeOptions &options)
   lost_bad_frames_ = this->get_parameter("lost_bad_frames").as_int();
   show_latency_overlay_ = this->get_parameter("show_latency_overlay").as_bool();
   latency_warn_ms_ = this->get_parameter("latency_warn_ms").as_double();
+  enable_morphology_ = this->get_parameter("enable_morphology").as_bool();
+  morphology_kernel_size_ = this->get_parameter("morphology_kernel_size").as_int();
   camera_x_to_east_sign_ = this->get_parameter("camera_x_to_body_east_sign").as_double();
   camera_y_to_north_sign_ = this->get_parameter("camera_y_to_body_north_sign").as_double();
   camera_offset_x_ = this->get_parameter("camera_offset_x").as_double();
@@ -88,6 +92,7 @@ ArucoFractalTracker::ArucoFractalTracker(const rclcpp::NodeOptions &options)
     "image_input_topic", 10, std::bind(&ArucoFractalTracker::imageCallback, this, std::placeholders::_1));
 
   image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("image_output_topic", 10);
+  preprocessed_image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("preprocessed_output_topic", 10);
 
   marker_pose_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("poses_output_topic", 10);
   target_pub_ = this->create_publisher<dib_msgs::msg::LandingTarget6D>("target_output_topic", 10);
@@ -272,7 +277,40 @@ void ArucoFractalTracker::imageCallback(const sensor_msgs::msg::Image::SharedPtr
     return;
   }
 
-  if (detector_.detect(cv_ptr->image))
+  cv::Mat detect_input;
+  if (cv_ptr->image.channels() == 3)
+  {
+    cv::cvtColor(cv_ptr->image, detect_input, cv::COLOR_BGR2GRAY);
+  }
+  else
+  {
+    detect_input = cv_ptr->image.clone();
+  }
+
+  if (enable_morphology_)
+  {
+    int ksize = (morphology_kernel_size_ % 2 == 0) ? morphology_kernel_size_ + 1 : morphology_kernel_size_;
+    if (ksize < 3) ksize = 3;
+    if (ksize > 31) ksize = 31;
+    cv::Mat kernel = cv::getStructuringElement(cv::MORPH_RECT, cv::Size(ksize, ksize));
+    // In OpenCV Grayscale: Black=0, White=255.
+    // MORPH_OPEN (Erode then Dilate) expands Black(0) into White(255) gaps to bridge broken borders.
+    cv::morphologyEx(detect_input, detect_input, cv::MORPH_OPEN, kernel);
+  }
+
+  if (preprocessed_image_pub_ && preprocessed_image_pub_->get_subscription_count() > 0)
+  {
+    try
+    {
+      preprocessed_image_pub_->publish(*precision_landing::matToImageMsg(detect_input, msg->header, "mono8"));
+    }
+    catch (const std::exception& e)
+    {
+      RCLCPP_ERROR_STREAM(this->get_logger(), "Error publishing preprocessed image: " << e.what());
+    }
+  }
+
+  if (detector_.detect(detect_input))
   {
     detector_.drawMarkers(cv_ptr->image);
 
